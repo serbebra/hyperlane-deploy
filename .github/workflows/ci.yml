@@ -5,97 +5,94 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
 jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      cache-key: ${{ steps.cache-keys.outputs.yarn-cache-key }}
+    steps:
+      - uses: actions/checkout@v3
+      - id: cache-keys
+        run: echo "::set-output name=yarn-cache-key::${{ runner.os }}-yarn-cache-${{ hashFiles('./yarn.lock') }}"
+
   yarn-install:
+    needs: setup
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-
       - name: yarn-cache
         uses: actions/cache@v3
         with:
           path: |
             **/node_modules
             .yarn/cache
-          key: ${{ runner.os }}-yarn-cache-${{ hashFiles('./yarn.lock') }}
-
+          key: ${{ needs.setup.outputs.cache-key }}
       - name: yarn-install
-        # Check out the lockfile from main, reinstall, and then
-        # verify the lockfile matches what was committed.
         run: |
           yarn install
           CHANGES=$(git status -s --ignore-submodules)
-          if [[ ! -z $CHANGES ]]; then
-            echo "Changes found: $CHANGES"
-            git diff
+          if [[ -n $CHANGES ]]; then
+            echo "Changes detected in lockfile or node_modules:"
+            echo "$CHANGES"
             exit 1
           fi
 
   build:
-    needs: [yarn-install]
+    needs: yarn-install
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-
       - name: yarn-cache
         uses: actions/cache@v3
         with:
           path: |
             **/node_modules
             .yarn/cache
-          key: ${{ runner.os }}-yarn-cache-${{ hashFiles('./yarn.lock') }}
-
+          key: ${{ needs.setup.outputs.cache-key }}
       - name: build
-        run: yarn run build
+        run: yarn build
 
   deploy:
-    needs: [build]
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-
       - name: yarn-cache
         uses: actions/cache@v3
         with:
           path: |
             **/node_modules
             .yarn/cache
-          key: ${{ runner.os }}-yarn-cache-${{ hashFiles('./yarn.lock') }}
-
+          key: ${{ needs.setup.outputs.cache-key }}
       - name: Install Foundry
         uses: onbjerg/foundry-toolchain@v1
         with:
           version: nightly
-
       - name: deploy
         run: ./ci.sh
 
   lint:
-    needs: [yarn-install]
+    needs: yarn-install
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-
       - name: yarn-cache
         uses: actions/cache@v3
         with:
           path: |
             **/node_modules
             .yarn/cache
-          key: ${{ runner.os }}-yarn-cache-${{ hashFiles('./yarn.lock') }}
-
+          key: ${{ needs.setup.outputs.cache-key }}
       - name: eslint
         run: yarn lint
-
       - name: prettier
         run: |
           yarn prettier
           CHANGES=$(git status -s)
-          if [[ ! -z $CHANGES ]]; then
-            echo "Changes found: $CHANGES"
+          if [[ -n $CHANGES ]]; then
+            echo "Formatting issues found:"
+            echo "$CHANGES"
             exit 1
           fi
